@@ -14,7 +14,7 @@ just clone this repo to wherever you want and then use `launch %command%` as you
 e.g.
 ```
 export SF_INSTALL_DIR=/opt/sf
-git clone httpsL//github.com/elee1766/sf.git $INSTALL_DIR
+git clone https://github.com/elee1766/sf.git $INSTALL_DIR
 cp $INSTALL_DIR/games.example.conf $INSTALL_DIR/games.conf
 ```
 
