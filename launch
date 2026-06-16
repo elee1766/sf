@@ -1,0 +1,38 @@
+#!/bin/bash
+# steamflags - unified launch wrapper for Steam games
+# Usage (Steam launch options): /opt/sf/launch %command%
+#
+# Reads config from /opt/sf/games.conf
+# Scrubs secrets, applies [default] section, then [AppId] overrides.
+
+SF_DIR="$(dirname "$(readlink -f "$0")")"
+CONF="$SF_DIR/games.conf"
+APPID="$SteamAppId"
+
+source "$SF_DIR/lib/config.sh"
+
+scrub_env
+apply_section "default"
+[[ -n "$APPID" ]] && apply_section "$APPID"
+
+# build launch prefix
+CMD=()
+
+# gamemode (set SF_GAMEMODE=1 to enable)
+if [[ "$SF_GAMEMODE" == "1" ]]; then
+    CMD+=(gamemoderun)
+fi
+
+# gamescope wrapper (set SF_GAMESCOPE=1 to enable)
+if [[ "$SF_GAMESCOPE" == "1" ]]; then
+    GS_W="${SF_GAMESCOPE_W:-2560}"
+    GS_H="${SF_GAMESCOPE_H:-1440}"
+    GS_R="${SF_GAMESCOPE_R:-360}"
+    GS_EXTRA="${SF_GAMESCOPE_EXTRA:---immediate-flips}"
+    CMD+=(gamescope -W "$GS_W" -H "$GS_H" -r "$GS_R" -f $GS_EXTRA --)
+fi
+
+# strip SF_* from env before exec
+unset "${!SF_@}"
+
+exec "${CMD[@]}" "$@"

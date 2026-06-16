@@ -1,0 +1,92 @@
+#!/bin/bash
+# steamflags CLI
+# Usage:
+#   sf search [query]   - list installed games, optionally filter by name
+#   sf show <appid>     - show config for a game
+#   sf edit             - open games.conf in $EDITOR
+
+SF_DIR="$(dirname "$(readlink -f "$0")")"
+CONF="$SF_DIR/games.conf"
+
+# Steam library paths from libraryfolders.vdf
+get_library_paths() {
+    local vdf
+    for vdf in \
+        "$HOME/.steam/steam/steamapps/libraryfolders.vdf" \
+        "$HOME/.local/share/Steam/steamapps/libraryfolders.vdf" \
+        "$HOME/.steam/root/steamapps/libraryfolders.vdf"; do
+        [[ -f "$vdf" ]] && { grep '"path"' "$vdf" | sed 's/.*"\(.*\)"/\1/'; return; }
+    done
+}
+
+cmd_search() {
+    local query="$1"
+
+    {
+        while IFS= read -r libpath; do
+            for manifest in "$libpath/steamapps"/appmanifest_*.acf; do
+                [[ -f "$manifest" ]] || continue
+                local appid name
+                appid=$(grep '"appid"' "$manifest" | head -1 | sed 's/.*"\(.*\)"/\1/')
+                name=$(grep '"name"' "$manifest" | head -1 | sed 's/.*"\(.*\)"/\1/')
+                [[ -n "$appid" && -n "$name" ]] && printf "%-10s %s\n" "$appid" "$name"
+            done
+        done < <(get_library_paths)
+    } | sort -t' ' -k2 -f | if [[ -n "$query" ]]; then grep -i "$query"; else cat; fi
+}
+
+cmd_show() {
+    local target="$1"
+    [[ -z "$target" ]] && echo "usage: sf show <appid>" && exit 1
+
+    echo "[default]"
+    local in_section=false
+    while IFS= read -r line; do
+        local stripped="${line%%#*}"
+        stripped="${stripped## }"
+        stripped="${stripped%% }"
+        [[ -z "$stripped" ]] && continue
+
+        if [[ "$stripped" =~ ^\[(.+)\]$ ]]; then
+            [[ "${BASH_REMATCH[1]}" == "default" ]] && in_section=true || in_section=false
+            continue
+        fi
+        $in_section && echo "  $stripped"
+    done < "$CONF"
+
+    echo ""
+    echo "[$target]"
+    in_section=false
+    while IFS= read -r line; do
+        local stripped="${line%%#*}"
+        stripped="${stripped## }"
+        stripped="${stripped%% }"
+        [[ -z "$stripped" ]] && continue
+
+        if [[ "$stripped" =~ ^\[(.+)\]$ ]]; then
+            [[ "${BASH_REMATCH[1]}" == "$target" ]] && in_section=true || in_section=false
+            continue
+        fi
+        $in_section && echo "  $stripped"
+    done < "$CONF"
+}
+
+cmd_edit() {
+    ${EDITOR:-vi} "$CONF"
+}
+
+case "${1:-}" in
+    search) cmd_search "$2" ;;
+    show)   cmd_show "$2" ;;
+    edit)   cmd_edit ;;
+    *)
+        echo "steamflags - manage Steam launch environment"
+        echo ""
+        echo "usage:"
+        echo "  sf search [query]   list installed games, optionally filter by name"
+        echo "  sf show <appid>     show config for a game"
+        echo "  sf edit             open games.conf in \$EDITOR"
+        echo ""
+        echo "Steam launch options:  /opt/sf/launch %command%"
+        ;;
+esac
