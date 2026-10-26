@@ -18,6 +18,12 @@ apply_section "default"
 # build launch prefix
 CMD=()
 
+# run in a systemd user slice (default game.slice, SF_SLICE=0 to disable)
+SLICE="${SF_SLICE:-game.slice}"
+if [[ "$SLICE" != "0" ]] && command -v systemd-run >/dev/null; then
+    CMD+=(systemd-run --user --scope --quiet --collect --slice="$SLICE" --)
+fi
+
 # gamemode (set SF_GAMEMODE=1 to enable)
 if [[ "$SF_GAMEMODE" == "1" ]]; then
     CMD+=(gamemoderun)
@@ -32,7 +38,28 @@ if [[ "$SF_GAMESCOPE" == "1" ]]; then
     CMD+=(gamescope -W "$GS_W" -H "$GS_H" -r "$GS_R" -f $GS_EXTRA --)
 fi
 
+# log output (set SF_LOGPATH to a directory to enable)
+LOG_DEST="$SF_LOGPATH"
+
 # strip SF_* from env before exec
 unset "${!SF_@}"
 
-exec "${CMD[@]}" "$@"
+if [[ -n "$LOG_DEST" ]]; then
+    mkdir -p "$LOG_DEST"
+    LOGFILE="$LOG_DEST/${APPID:-unknown}_$(date +%Y%m%d_%H%M%S).log"
+    {
+        echo "=== steamflags launch ==="
+        echo "date: $(date -Iseconds)"
+        echo "appid: ${APPID:-unknown}"
+        echo "cmd: ${CMD[*]} $*"
+        echo "--- applied ---"
+        for key in "${SF_APPLIED_KEYS[@]}"; do
+            echo "$key=${!key}"
+        done
+        echo "==========================="
+        echo ""
+    } >"$LOGFILE"
+    exec "${CMD[@]}" "$@" &>>"$LOGFILE"
+else
+    exec "${CMD[@]}" "$@"
+fi

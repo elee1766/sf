@@ -51,6 +51,7 @@ PROTON_DXVK_LLASYNC=1            # use low-latency async dxvk variant
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `SF_SLICE` | `game.slice` | systemd user slice to run in, `0` to disable |
 | `SF_GAMEMODE` | `0` | `1` to wrap with `gamemoderun` |
 | `SF_GAMESCOPE` | `0` | `1` to wrap with `gamescope` |
 | `SF_GAMESCOPE_W` | `2560` | gamescope output width |

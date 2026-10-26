@@ -75,10 +75,175 @@ cmd_edit() {
     ${EDITOR:-vi} "$CONF"
 }
 
+# get all appids that have a [section] in games.conf
+get_configured_appids() {
+    grep -oP '^\[\K[0-9]+(?=\])' "$CONF"
+}
+
+# find localconfig.vdf (most recently modified)
+find_localconfig() {
+    find "$HOME/.local/share/Steam/userdata" -name "localconfig.vdf" -printf '%T@ %p\n' 2>/dev/null \
+        | sort -rn | head -1 | cut -d' ' -f2-
+}
+
+cmd_apply() {
+    local launch_cmd="$SF_DIR/launch %command%"
+    local vdf
+    vdf=$(find_localconfig)
+    [[ -z "$vdf" ]] && echo "error: localconfig.vdf not found" && exit 1
+
+    # check if steam is running
+    if pgrep -x steam >/dev/null 2>&1; then
+        echo "warning: steam is running. changes may be overwritten."
+        echo "         close steam first for reliable results."
+        echo ""
+    fi
+
+    local appids
+    appids=$(get_configured_appids)
+    [[ -z "$appids" ]] && echo "no game sections found in games.conf" && exit 0
+
+    local backup="$vdf.sf-backup.$(date +%s)"
+    cp "$vdf" "$backup"
+    echo "backup: $backup"
+
+    local count=0
+    for appid in $appids; do
+        # check if this appid already has our launch command
+        if grep -A5 "\"$appid\"" "$vdf" | grep -q "LaunchOptions.*opt/sf/launch\|LaunchOptions.*$SF_DIR/launch"; then
+            echo "  $appid: already set"
+            continue
+        fi
+
+        # find the appid section and add/replace LaunchOptions
+        if grep -q "\"$appid\"" "$vdf"; then
+            # check if LaunchOptions exists for this app
+            # use python for reliable VDF editing since it's nested and whitespace-sensitive
+            python3 -c "
+import sys
+vdf_path = '$vdf'
+appid = '$appid'
+launch_cmd = '$launch_cmd'
+
+with open(vdf_path, 'r') as f:
+    lines = f.readlines()
+
+in_app = False
+app_depth = 0
+found_launch = False
+result = []
+i = 0
+while i < len(lines):
+    line = lines[i]
+    stripped = line.strip()
+
+    if '\"' + appid + '\"' in stripped and not in_app:
+        in_app = True
+        app_depth = 0
+        result.append(line)
+        i += 1
+        continue
+
+    if in_app:
+        if '{' in stripped:
+            app_depth += 1
+        if '}' in stripped:
+            app_depth -= 1
+            if app_depth <= 0:
+                if not found_launch:
+                    # insert LaunchOptions before closing brace
+                    indent = '\t' * (line.count('\t'))
+                    result.append(indent + '\"LaunchOptions\"\t\t\"' + launch_cmd + '\"\n')
+                in_app = False
+        if '\"LaunchOptions\"' in stripped:
+            # replace existing
+            indent = line[:len(line) - len(line.lstrip())]
+            result.append(indent + '\"LaunchOptions\"\t\t\"' + launch_cmd + '\"\n')
+            found_launch = True
+            i += 1
+            continue
+
+    result.append(line)
+    i += 1
+
+with open(vdf_path, 'w') as f:
+    f.writelines(result)
+" 2>/dev/null
+            if [[ $? -eq 0 ]]; then
+                echo "  $appid: set launch options"
+                ((count++))
+            else
+                echo "  $appid: failed to update"
+            fi
+        else
+            echo "  $appid: not found in localconfig (not installed?)"
+        fi
+    done
+
+    echo ""
+    echo "updated $count game(s). restart steam to apply."
+}
+
+cmd_unapply() {
+    local vdf
+    vdf=$(find_localconfig)
+    [[ -z "$vdf" ]] && echo "error: localconfig.vdf not found" && exit 1
+
+    if pgrep -x steam >/dev/null 2>&1; then
+        echo "warning: steam is running. close steam first."
+        echo ""
+    fi
+
+    local appids
+    appids=$(get_configured_appids)
+    [[ -z "$appids" ]] && echo "no game sections found in games.conf" && exit 0
+
+    local backup="$vdf.sf-backup.$(date +%s)"
+    cp "$vdf" "$backup"
+    echo "backup: $backup"
+
+    local count=0
+    for appid in $appids; do
+        python3 -c "
+import sys
+vdf_path = '$vdf'
+appid = '$appid'
+
+with open(vdf_path, 'r') as f:
+    lines = f.readlines()
+
+in_app = False
+result = []
+for line in lines:
+    stripped = line.strip()
+    if '\"' + appid + '\"' in stripped:
+        in_app = True
+    if in_app and '\"LaunchOptions\"' in stripped and 'sf/launch' in stripped:
+        in_app = False
+        continue  # remove this line
+    if in_app and '}' in stripped:
+        in_app = False
+    result.append(line)
+
+with open(vdf_path, 'w') as f:
+    f.writelines(result)
+" 2>/dev/null
+        if [[ $? -eq 0 ]]; then
+            echo "  $appid: removed launch options"
+            ((count++))
+        fi
+    done
+
+    echo ""
+    echo "cleaned $count game(s). restart steam to apply."
+}
+
 case "${1:-}" in
-    search) cmd_search "$2" ;;
-    show)   cmd_show "$2" ;;
-    edit)   cmd_edit ;;
+    search)   cmd_search "$2" ;;
+    show)     cmd_show "$2" ;;
+    edit)     cmd_edit ;;
+    apply)    cmd_apply ;;
+    unapply)  cmd_unapply ;;
     *)
         echo "steamflags - manage Steam launch environment"
         echo ""
@@ -86,7 +251,9 @@ case "${1:-}" in
         echo "  sf search [query]   list installed games, optionally filter by name"
         echo "  sf show <appid>     show config for a game"
         echo "  sf edit             open games.conf in \$EDITOR"
+        echo "  sf apply            set launch options for all configured games"
+        echo "  sf unapply          remove sf launch options from all configured games"
         echo ""
-        echo "Steam launch options:  /opt/sf/launch %command%"
+        echo "Steam launch options:  $SF_DIR/launch %command%"
         ;;
 esac

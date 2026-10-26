@@ -1,6 +1,8 @@
 # config parser for steamflags
 # sources games.conf and applies sections
 
+SF_APPLIED_KEYS=()
+
 apply_section() {
     local target="$1"
     local in_section=false
@@ -21,7 +23,9 @@ apply_section() {
         if [[ "$line" == -* ]]; then
             unset "${line#-}"
         elif [[ "$line" == *=* ]]; then
+            local key="${line%%=*}"
             export "$line"
+            SF_APPLIED_KEYS+=("$key")
         fi
     done < "$CONF"
 }
